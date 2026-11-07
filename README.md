@@ -23,18 +23,27 @@ counts for more in the vote. That makes the interesting failure modes visible �
 no spine abandoning the correct call because the confident one disagreed.
 
 ## Start here
-- **[software/HANDOFF.md](software/HANDOFF.md)** — the design, the measured facts, and what is
-  still unknown. Source of truth.
+- **[CONTINUE-HERE.md](CONTINUE-HERE.md)** — session handoff: setup on a new machine, every
+  measured result, every bug already fixed, and what is verified vs unverified.
+  **Read this first if you are picking the project up.**
+- [software/HANDOFF.md](software/HANDOFF.md) — the design and the measured facts in full.
 - [software/CLAUDE.md](software/CLAUDE.md) — quick orientation and the command list.
 - [idea.org](idea.org) — where the idea came from.
 
 ## Run it
-```bash
-cd software
-python -m venv .venv
-.venv/Scripts/pip install torch --index-url https://download.pytorch.org/whl/cu130
-.venv/Scripts/pip install -r requirements.txt
-.venv/Scripts/python tests.py      # 32 tests, no model download needed
-.venv/Scripts/python debate.py     # the demo
+
+On a fresh machine, one command does the whole setup (venv, CUDA torch, dependencies, model):
+
+```powershell
+.\setup.ps1
 ```
-`WORLD=poker python debate.py` runs the same console on poker hands instead of alerts.
+
+Then the dashboard — live state, sliders, and raw panel traffic:
+
+```bash
+software/.venv/Scripts/python software/ui.py --serial
+```
+
+and open <http://127.0.0.1:8000>. Drop `--serial` to run with no hardware.
+`software/debate.py` is the terminal version, and `WORLD=poker` runs either on poker hands
+instead of alerts.
