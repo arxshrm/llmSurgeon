@@ -27,6 +27,8 @@ no spine abandoning the correct call because the confident one disagreed.
   measured result, every bug already fixed, and what is verified vs unverified.
   **Read this first if you are picking the project up.**
 - [software/HANDOFF.md](software/HANDOFF.md) — the design and the measured facts in full.
+- [SESSION-LOG.md](SESSION-LOG.md) — chronological record of the 7 Nov 2026 session: what was
+  tried, what failed, and why each decision was made.
 - [software/CLAUDE.md](software/CLAUDE.md) — quick orientation and the command list.
 - [idea.org](idea.org) — where the idea came from.
 

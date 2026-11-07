@@ -7,6 +7,9 @@ Read order: this file → [`software/HANDOFF.md`](software/HANDOFF.md) (design +
 facts) → [`RUNBOOK.md`](RUNBOOK.md) (commands) → [`arduino/README.md`](arduino/README.md)
 (hardware).
 
+For the chronological story of *how* these conclusions were reached — what was tried, what
+failed, and why each decision was made — see [`SESSION-LOG.md`](SESSION-LOG.md).
+
 ---
 
 ## 1. Thirty-second summary
