@@ -294,14 +294,29 @@ UBEC. `DITHER_MAX_DEG` (45) is the first thing to turn down.
 
 ## 10. Git state
 
-Two commits on branch **`steering-and-arduino-panel`**, `main` untouched:
+Three commits on **`main`**, ahead of `origin/main`:
 
 - `95476de` — incident world, working activation steering, Arduino panel
 - `e959925` — web dashboard
+- `e4c7904` — this handoff, `setup.ps1`, and the steering vectors
 
 ```bash
-git checkout main && git merge steering-and-arduino-panel
+git push origin main
 ```
+
+Then on the other machine:
+
+```bash
+git clone <your repo url> && cd llmSurgeon && .\setup.ps1
+```
+
+**Verified by actually doing it:** a fresh clone of `main` passes all 57 Python tests, loads
+the shipped steering vector in `activation` mode with **no rebuild**, compiles both sketches
+for `arduino:avr:mega`, and passes the 58 parser checks. The only thing a new machine
+downloads is the model weights.
+
+What is *not* in the repo, by design: `software/.venv/`, `__pycache__/`, the model cache
+(`~/.cache/huggingface`, ~3 GB), and `arduino/test/test_protocol` build output.
 
 Working style for whoever picks this up: concise, direct, honest pushback, no filler.
 First-year CS, strong maths — explain new ML concepts briefly when they first come up.
