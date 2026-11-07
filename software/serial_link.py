@@ -78,7 +78,10 @@ class SerialPanel:
     `enabled` goes False and the demo carries on with the keyboard."""
 
     def __init__(self, port=None, baud=115200, names=None, timeout=2.5,
-                 verbose=False, stream=None, servo_shows_knob=False):
+                 verbose=False, stream=None, servo_shows_knob=False, on_event=None):
+        # on_event(kind, line, detail) is called for every line the panel sends. The web UI
+        # uses it to show raw traffic, which is how you prove a knob turn reached the laptop.
+        self.on_event = on_event
         self.verbose = verbose
         self.enabled = False
         self.port = port
@@ -207,24 +210,36 @@ class SerialPanel:
             print("  rx", line)
         parts = line.split()
         tag = parts[0]
+        kind, detail = "other", ""
         try:
             if tag == "RDY":
                 self.ready = True
+                kind, detail = "ready", "panel booted"
             elif tag == "K" and len(parts) >= 3:
                 idx, v = int(parts[1]), float(parts[2])
                 k = (v - KNOB_CENTRE) / KNOB_CENTRE
                 self.knobs[idx] = 0.0 if abs(k) < DEAD_ZONE else _clamp(k, -1, 1)
+                kind = "rotate"
+                detail = f"agent {idx} knob -> {self.knobs[idx]:+.2f}"
             elif tag == "B" and len(parts) >= 2:
                 self.selected = int(parts[1])
+                kind, detail = "select", f"selected agent {self.selected}"
             elif tag == "P" and len(parts) >= 2:
                 self.pot = int(parts[1])
+                kind, detail = "pot", f"pot {self.pot}"
             elif tag == "ST" and len(parts) >= 3:
                 idx, v = int(parts[1]), float(parts[2])
                 k = (v - KNOB_CENTRE) / KNOB_CENTRE
                 self.knobs.setdefault(idx, 0.0 if abs(k) < DEAD_ZONE
                                       else _clamp(k, -1, 1))
+                kind, detail = "state", f"agent {idx} reported knob {v:.0f}"
         except (ValueError, IndexError):
             return          # malformed line from a noisy cable: ignore it
+        if self.on_event is not None:
+            try:
+                self.on_event(kind, line, detail)
+            except Exception:
+                pass        # a broken listener must never kill the serial reader
 
     # --------------------------------------------------------------- common
     def take_knob(self, agent_index):

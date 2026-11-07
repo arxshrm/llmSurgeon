@@ -510,6 +510,94 @@ class TestSerialProtocol(unittest.TestCase):
             p.close()
 
 
+class TestWebApi(unittest.TestCase):
+    """The dashboard's HTTP layer, driven against a stub engine so no model is loaded."""
+
+    @classmethod
+    def setUpClass(cls):
+        import ui
+        cls.ui = ui
+
+    def server(self):
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        class StubEngine:
+            def __init__(self):
+                self.calls = []
+
+            def snapshot(self):
+                return {"mode": "activation", "agents": [], "events": [], "round": 1}
+
+            def control(self, cmd):
+                self.calls.append(cmd)
+                if cmd.get("what") == "boom":
+                    raise ValueError("deliberate")
+                return f"did {cmd.get('what')}"
+
+        eng = StubEngine()
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), self.ui.make_handler(eng))
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv, eng, f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def test_state_control_and_errors(self):
+        import json
+        import urllib.error
+        import urllib.request
+        srv, eng, base = self.server()
+        try:
+            s = json.load(urllib.request.urlopen(base + "/api/state", timeout=5))
+            self.assertEqual(s["mode"], "activation")
+
+            req = urllib.request.Request(
+                base + "/api/control", data=json.dumps({"what": "next"}).encode(),
+                headers={"Content-Type": "application/json"})
+            r = json.load(urllib.request.urlopen(req, timeout=5))
+            self.assertTrue(r["ok"])
+            self.assertEqual(eng.calls[-1]["what"], "next")
+
+            # the page is served at /
+            with urllib.request.urlopen(base + "/", timeout=5) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            self.assertIn("llmSurgeon", body)
+            self.assertIn("/api/state", body)
+
+            # unknown path is a clean 404, not a traceback
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(base + "/nope", timeout=5)
+            self.assertEqual(cm.exception.code, 404)
+
+            # a control that raises becomes a 400 with a message, and does not kill
+            # the server
+            req = urllib.request.Request(
+                base + "/api/control", data=json.dumps({"what": "boom"}).encode(),
+                headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req, timeout=5)
+            self.assertEqual(cm.exception.code, 400)
+
+            # still alive afterwards
+            s = json.load(urllib.request.urlopen(base + "/api/state", timeout=5))
+            self.assertEqual(s["round"], 1)
+
+            # malformed body is also a 400, not a crash
+            req = urllib.request.Request(
+                base + "/api/control", data=b"{not json",
+                headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req, timeout=5)
+            self.assertEqual(cm.exception.code, 400)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_ui_html_is_served_from_beside_ui_py(self):
+        import os
+        self.assertTrue(os.path.exists(os.path.join(self.ui.HERE, "ui.html")),
+                        "ui.html must sit next to ui.py or the page 500s")
+
+
 class TestMetrics(unittest.TestCase):
     """conformity / influence / entropy. These need agent.py but not a loaded model."""
 

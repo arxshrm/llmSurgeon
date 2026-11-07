@@ -21,7 +21,8 @@ python build_risk_vec.py # make risk_vec.pt (the thing the knob pushes along)
 python sweep.py          # does the knob work, and how far can it be turned?
 python diagnose.py       # is the model reading the scenario, or guessing?
 python run_baseline.py   # scored accuracy, with and without steering
-python debate.py         # THE DEMO            (add --serial for the Arduino panel)
+python ui.py --serial    # WEB DASHBOARD at :8000 -- sliders + live panel traffic
+python debate.py         # terminal demo       (add --serial for the Arduino panel)
 python serial_link.py --demo   # hardware link test, no AI involved
 python fake_pi.py        # stand-in for the superseded Pi path, prints the JSON
 ```
@@ -41,6 +42,7 @@ Change any of them and you must re-run `build_risk_vec.py` and `sweep.py`.**
 | `poker.py` | flop spots: fold / call / raise. Monte Carlo equity. No ML |
 | `agent.py` | `Brain` (shared model, steering hook, calibration) + `Agent` (coef, alpha) |
 | `debate.py` | the live loop: rounds, weighted votes, conformity, keyboard + knobs |
+| `ui.py` / `ui.html` | web dashboard: live state, sliders, and raw panel traffic so you can prove a knob turn landed. Stdlib HTTP, no deps |
 | `serial_link.py` | **Arduino Mega over USB serial — the live hardware path** |
 | `bridge.py` | UDP JSON to/from a Pi. Superseded, kept for the Pi 4 |
 | `fake_pi.py` | fake hardware for the UDP path, testable with nothing attached |

@@ -75,7 +75,28 @@ export MAX_STRENGTH=2.5
 
 ---
 
-## 3. Run the demo
+## 3. Run the dashboard (easiest way to see what is happening)
+
+```bash
+software/.venv/Scripts/python software/ui.py --serial
+```
+
+Open **http://127.0.0.1:8000**. Drop `--serial` to run with no hardware at all.
+
+The top panel answers one question directly: **did my encoder turn reach the laptop?** Every
+line the panel sends is shown raw with a timestamp, next to the coefficient it changed, and
+the agent's card flashes. If you rotate and nothing appears there, the laptop never heard it
+— a wiring problem, not a model problem. That distinction was impossible to make from the
+terminal.
+
+It also gives you sliders for each agent's coefficient and presence, the full action
+distribution, attention level, ground truth, running accuracy, and buttons for vibration
+mode, servo source and relax. The max-strength slider warns in orange above 2.0, where
+steering starts to reverse.
+
+Local only — it binds 127.0.0.1 and nothing leaves the machine.
+
+## 4. Or run the terminal version
 
 ```bash
 software/.venv/Scripts/python software/debate.py
@@ -102,7 +123,7 @@ unattended, and for a screen recording.
 
 ---
 
-## 4. Add the hardware — Arduino Mega over USB
+## 5. Add the hardware — Arduino Mega over USB
 
 Full detail and the pinout: [`arduino/README.md`](arduino/README.md). Four steps, each of
 which works on its own, so you always know which one broke.
@@ -144,7 +165,7 @@ without `--serial` still speaks that UDP protocol if you ever want the Pi 4 in t
 
 ---
 
-## 5. If something breaks
+## 6. If something breaks
 
 | symptom | cause |
 |---|---|
@@ -161,7 +182,7 @@ without `--serial` still speaks that UDP protocol if you ever want the Pi 4 in t
 
 ---
 
-## 6. What is not done
+## 7. What is not done
 
 - `build_risk_vec.py` and `sweep.py` have not been run yet — the model download gated them.
   Until they are, steering is the logit fallback.
