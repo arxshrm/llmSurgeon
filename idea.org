@@ -1,0 +1,77 @@
+#+title: Idea
+* TRACKS
+** MW
+- explore idea of new world
+*** idea01
+- shows heat lines
+- shows free body diagram
+- ai...
+** Incident IO
+- ask, wait and respond.
+- things happen in real time - open to interpretation
+- build an agent that runs on live feed? bloomberg?
+  - *TWIST:* live feed is our tweaks
+- point at camera feed, mic, screen(eye tracker -> the section of the screen you stare at OR screen sharing) or game
+- respond in the moment
+
+MISC:
+each agent has different personalities/ways to approach problem e.g. thinking dynamically/functionally/oop -> to do the same job.
+common attr. include, confidence score, risk level, decision base, desperation
+TODO research what exactly will make
+- use it to make trades, poker -> prompt can be anything
+- use servos to look inside the mind of the trader
+- leds to indicate success and failure
+-
+-
+- telegraph
+- fax
+- surgeons
+- teletubies
+* misc ideas
+** power distribution - see where you get your power from
+- detect stress of oncall engineers during down time, in critical condition, check pr's, log everything, give engineers a break, and deploy agents to resolve issue #fire
+- reverse engineering??
+
+** give story book -> make a narative game
+** 4d model with time?
+* LLMneurosurgeon
+- each agent corresponds to motor.
+- motor measures rotation which indicate weights//confidence levels//credit usage// etc.
+- can control servo/potentiometer to tweak weights//steer agents
+- if agent dies etc.
+** motivation - hugging face's attack by open ai -> humans could not monitor multiple agents
+** aesthetics - telephone operators, airplane cockpit
+- indicator
+  - directions indicate side of argument statement
+  - who is working with who/talking with who.
+- SW
+  - cleaning agent logs(big data) into physical and visual changes
+- SELLING POINT: changing parameters (weights/confidence) realtime without terminating agent.
+** singular agent multiple servos
+- multiple parameters/tweaks to personality
+** tweak
+*** track
+- ask, wait and respond.
+- things happen in real time - open to interpretation
+- build an agent that runs on live feed? bloomberg?
+- point at camera feed, mic, screen(eye tracker -> the section of the screen you stare at OR screen sharing) or game
+- respond in the moment
+** delegate
+- krishiv - research into attributes of agent to correct and control
+- zack - hardware
+- shadman - software - weight tweaking
+- software
+  - pi to servo
+    - zack -> working led, servo rotation, buttons, joystick
+    - aesthetics: same as when you start a car, rev meter goes idle to max then to idle
+  - llm to pi
+    -
+  - wirelessley
+** how to change weights of llm mid-way through
+* Werity
+- will win whackiest.
+- incident io/whackiest/
+- unexplored - hiking/warwick trail
+- adventure/conservative personality traits knobs (fits into incident)
+* TODO testing
+- monkeypatching
