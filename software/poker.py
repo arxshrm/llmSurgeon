@@ -55,6 +55,11 @@ class Spot:
     def pot_odds(self) -> float:
         return self.bet / (self.pot + 2 * self.bet)
 
+    def urgency(self) -> float:
+        """0-1, how much this situation demands acting. Drives vibration FREQUENCY on the
+        panel. Mirrors Incident.urgency() so both worlds feed the hardware identically."""
+        return max(0.0, min(1.0, self.equity))
+
     # ---------- text for the LLM ----------
     def describe(self, show_equity: bool = True) -> str:
         hint = (f"Your estimated chance of winning: {round(self.equity*100)}%. "

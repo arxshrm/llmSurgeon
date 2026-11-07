@@ -1,38 +1,77 @@
-# llmSurgeon — software (Shadman)
+# llmSurgeon — software
 
-WHACK 2026 hackathon, incident.io track. Team: Krishiv (agent attributes), Zack (hardware), Shadman (software: steering / "weight tweaking").
+WHACK 2026, incident.io track. Team: Krishiv (agent attributes), Zack (hardware),
+Shadman (software / steering).
 
-## Concept
-Physical console for watching and steering several LLM agents live, without restarting them.
-- Every agent gets the same poker spot: fold, call or raise?
-- All agents = ONE shared LLM, different system-prompt personality + own steering coefficient.
-- **Servo = gauge.** Angle = how risky the agent currently "thinks" (projection of hidden state onto the risk vector). Jitter amplitude = indecision (entropy over fold/call/raise).
-- **Knob = steering.** Sets coefficient `c`; hidden state at layer L becomes `h + c * risk_vec` on every forward pass. c<0 cautious, 0 none, c>0 reckless. Weights never change.
-- **Green LED** = agent chose the highest-EV action (NOT "won the hand" — that's luck).
+**HANDOFF.md is the source of truth for the design and the measured facts. Read it.**
+This file is only the quick orientation; if the two ever disagree, HANDOFF.md wins.
+
+## What it is
+A physical console for watching and steering several LLM agents *while they run*.
+One shared local model, three agents, three knobs. A forward hook adds `c * risk_vec` to the
+hidden state at layer L on every forward pass, so turning a knob changes the agent's mind
+without restarting it. Servo = where it stands, vibration = how torn, LED = got it right.
+
+## Commands
+```bash
+python tests.py          # 37 tests, no model needed, ~6s. Run after any change.
+python bench.py          # speed gate: can agents narrate, or only vote?
+python smoke.py          # the checks that need the real model
+python build_risk_vec.py # make risk_vec.pt (the thing the knob pushes along)
+python sweep.py          # does the knob work, and how far can it be turned?
+python diagnose.py       # is the model reading the scenario, or guessing?
+python run_baseline.py   # scored accuracy, with and without steering
+python debate.py         # THE DEMO            (add --serial for the Arduino panel)
+python serial_link.py --demo   # hardware link test, no AI involved
+python fake_pi.py        # stand-in for the superseded Pi path, prints the JSON
+```
+
+Hardware is an **Arduino Mega over USB serial** — see [`../arduino/`](../arduino/) for the
+pinout, the bring-up order and the sketches. `../pi/` is the superseded Raspberry-Pi version.
+Arduino tests: `cd ../arduino/test && make` (54 checks on the real parser).
+
+**`describe()` text, the steering layer and the model all feed into `risk_vec.pt`.
+Change any of them and you must re-run `build_risk_vec.py` and `sweep.py`.**
 
 ## Files
-- `poker.py` — deals a flop spot (2 hole cards + 3 board, pot 100, bet 50/100/150/200, stack 400). Equity via Monte Carlo vs random hand (`treys`). EV: fold=0, call=eq*(pot+2bet)-bet, raise(all-in, assume called)=eq*(pot+2stack)-stack. ⇒ fold if eq<pot odds, raise if eq>0.5, else call. `describe()` gives the LLM its win % and pot odds (small models can't compute equity).
-- `agent.py` — `Brain` (shared model + forward hook on `model.model.layers[L]`, middle layer by default) and `Agent` (persona + coef). Decision = ONE forward pass, read next-token probs for fold/call/raise (both cases, all single tokens in Qwen). Returns probs, entropy, confidence = 1 - H/ln3, hidden state at layer L, regret, led.
-- `run_baseline.py` — runs N hands × 3 agents, prints per-hand + summary.
-- Env vars: `MODEL` (default Qwen/Qwen2.5-1.5B-Instruct), `DTYPE` (default fp32 on CPU, bf16 on GPU; bf16 on a CPU without native bf16 is very slow).
+| file | role |
+|---|---|
+| `world.py` | picks the scenario world. `WORLD=incident` (default) or `WORLD=poker` |
+| `incident.py` | on-call alerts: wait / page / restart. Bayes for `p`, cost model for EV. No ML |
+| `poker.py` | flop spots: fold / call / raise. Monte Carlo equity. No ML |
+| `agent.py` | `Brain` (shared model, steering hook, calibration) + `Agent` (coef, alpha) |
+| `debate.py` | the live loop: rounds, weighted votes, conformity, keyboard + knobs |
+| `serial_link.py` | **Arduino Mega over USB serial — the live hardware path** |
+| `bridge.py` | UDP JSON to/from a Pi. Superseded, kept for the Pi 4 |
+| `fake_pi.py` | fake hardware for the UDP path, testable with nothing attached |
+| `build_risk_vec.py` | contrastive pairs → `risk_vec.pt` |
+| `sweep.py` | coefficient sweep, finds `MAX_STRENGTH` from monotonicity |
+| `diagnose.py` | rank-correlation check + three calibration targets scored side by side |
+| `smoke.py` | model-dependent verification |
+| `tests.py` | everything checkable without the model |
 
-## Findings so far
-- Qwen2.5-0.5B ignores the cards entirely → use 1.5B (or bigger if a GPU is available).
-- 1.5B raw output is heavily biased to "fold" regardless of option order or explicit rules.
-- Fix = **calibration**: `Brain.calibrate()` averages log p(action) over 20 separate hands with the NEUTRAL persona, subtracts it from every decision. Applied identically to all agents so personalities are preserved. Neutral agent: 3/20 correct raw → 23/30 calibrated on held-out hands.
-- Baseline (30 hands, no steering): rock 30 fold, maniac 30 raise, wobbler mixed with confidence ≈ 0.03 (= the jittering one). Personas may be too strong for the knob to move; soften them if step 2 shows that.
-- ~0.7 s per decision on a bf16-capable CPU; laptop CPUs need fp32 (bf16 there is several times slower).
+Dependency order, strictly one direction:
+`world.py` → (`incident.py` | `poker.py`) → `agent.py` → `debate.py` / `sweep.py` / `run_baseline.py`
 
-## Next steps
-1. **Risk vector (make-or-break).** Contrastive prompt pairs (reckless vs cautious persona, same spot), ~50 pairs. Mean hidden state at layer L (last token) for each side; `risk_vec = mean(risky) - mean(safe)`. Save to `risk_vec.pt` (gitignored).
-2. **Sweep.** Wobbler agent, c in [-4, -2, -1, 0, 1, 2, 4] on ~20 hands. Expect raise rate ↑ and fold rate ↓ monotonically with c. Find MAX_STRENGTH just below where output breaks (prob mass on actions collapses / gibberish). Also try layers L±4.
-3. **Readout.** servo_angle from `hidden @ risk_unit`; jitter from entropy. Check projection correlates with c and with persona.
-4. **Live loop.** Agents decide continuously; coef read from shared state every forward pass; keyboard/slider input first.
-5. **Pi bridge.** WebSocket/MQTT JSON. Laptop→Pi `{"agent":1,"angle":0-180,"jitter":0-1,"led":true}`; Pi→laptop `{"agent":1,"knob":-1..1}`. Pots need ADC (MCP3008) or Arduino over serial. Knob mapping: raw 0–1023 → k=(raw-511.5)/511.5, dead zone |k|<0.05, c=k*MAX_STRENGTH.
-6. Scale beyond poker (any prompt) once the loop works.
+## Env vars
+| var | default | note |
+|---|---|---|
+| `WORLD` | `incident` | or `poker` |
+| `MODEL` | `Qwen/Qwen2.5-1.5B-Instruct` | 0.5B ignores the scenario. Action words must be single tokens — `Brain` asserts this |
+| `DTYPE` | `bf16` on GPU, `fp32` on CPU | measured: on GPU bf16 is 2.2x faster than fp32 and half the VRAM; on CPU fp32 is 3.6x faster than bf16 |
+| `MAX_STRENGTH` | `1.5` | knob range. **Measured**, not guessed — past it steering reverses. Re-run `sweep.py` if anything changes |
+| `STEER_POS` | `last` | inject at the final token only, or `all` positions |
+| `ANGLE` | `probs` | needle from the action distribution, or `projection` for the hidden-state probe (measured non-monotonic) |
 
-## Fallback
-If steering doesn't visibly change behaviour, use temperature + logit bias on "raise"/"fold" driven by the knob. Still live, less impressive.
+## Two things that are easy to get wrong
+1. **The readout layer is not the steering layer.** We inject at `steer_layer` and measure the
+   servo projection at `read_layer = steer_layer + 6`. Reading at the injection layer gives
+   `(h + c·v)·v̂ = h·v̂ + c‖v‖`, so the needle would track the knob arithmetically rather than
+   reflect the model. `smoke.py` asserts the measured projection differs from that echo.
+2. **`brain.mode` says which steering is live.** `activation` needs `risk_vec.pt`; without it
+   the code falls back to `logit` (biasing logits directly). Both are honest, but never claim
+   activation steering while in `logit` mode — the console prints the mode for this reason.
 
 ## Working style
-Shadman wants concise, direct answers, no filler; push back honestly. Explain new ML concepts briefly when introduced (he's a first-year CS student, strong maths).
+Shadman wants concise, direct answers and honest pushback, no filler. First-year CS, strong
+maths — explain new ML concepts briefly when they first come up.

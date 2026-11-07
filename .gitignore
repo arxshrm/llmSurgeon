@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+
+# Steering vectors: model-specific, rebuilt with build_risk_vec.py
+*.pt
+
+# Arduino / host-test build artefacts
+arduino/test/test_protocol
+arduino/test/test_protocol.exe
+arduino/**/build/
+*.o

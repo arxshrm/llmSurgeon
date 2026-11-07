@@ -8,6 +8,184 @@ This doc is written so a fresh Claude session on a new laptop can pick the work 
 
 ---
 
+## 0. Status update — target machine, session 2
+
+The move to the new machine happened. What changed:
+
+**The new machine has a GPU: NVIDIA RTX A2000 8 GB Laptop, bf16 supported.** The whole speed
+analysis in §4 and §5 assumed CPU-only and should be read with that in mind. Note that
+`bench.py` as originally written never moved the model or inputs to a device, so it measured
+the CPU regardless of what hardware was present; it now takes `cpu`/`cuda` arguments and
+synchronizes CUDA around every timed block (without that, async kernel launches make the GPU
+look infinitely fast).
+
+**8 GB of VRAM, not 32 GB of RAM, is now the binding constraint on model size.** A 7B in
+bf16 is ~15 GB and does not fit. 3B in bf16 (~6 GB) does. The disk is also at 98% with ~13 GB
+free, which is a second reason not to pull a 7B.
+
+**Downloads: set `HF_HUB_DISABLE_XET=1`.** The default xet backend throttled itself to
+concurrency 1 at ~29 KB/s and got 43 KB in nine minutes. With xet disabled, plain HTTPS did
+105 MB in under a minute. If a download ever crawls, this is why.
+
+**The servo readout had a circularity bug, now fixed.** The old code injected `c * risk_vec`
+at layer L and then read the servo projection from the output of that same layer, so
+`(h + c·v)·v̂ = h·v̂ + c‖v‖` — the needle tracked the knob arithmetically whether or not
+steering changed anything the model computed. A judge asking "is that the model or your dial?"
+would have been right. Injection is now at `steer_layer` and measurement at
+`read_layer = steer_layer + 6`; `smoke.py` asserts the measured projection differs from the
+naive echo.
+
+**Personas are now identical by default.** §4's persona-saturation worry is sidestepped rather
+than tuned around: all three agents share one neutral prompt and differ *only* by coefficient,
+so any behavioural difference is attributable to the knob instead of to the wording. Optional
+flavour strings are in `agent.py` as `FLAVOUR`, off by default. This also makes the demo claim
+stronger — "same model, same prompt, only this dial differs".
+
+**Both worlds work.** `WORLD=incident` (default) and `WORLD=poker` are both live via
+`world.py`; the swap is an env var, not a rewrite. The incident cost constants were grid-
+searched so the correct answer is 33% wait / 34% page / 34% restart — a lopsided mix would let
+an agent score well by always picking one action and make the LED meaningless.
+
+**Steering has an automatic honest fallback.** `brain.mode` is `activation` when `risk_vec.pt`
+exists and `logit` otherwise, and the console prints which is live. §10's fallback is no longer
+a thing to remember to implement under pressure.
+
+**`tests.py` — 37 tests, no model required, ~6 s.** Run it after any change.
+
+---
+
+## 0b. Measured results — these answer §4, §5 and §7's open questions
+
+### Speed: the architectural question is settled
+`bench.py` on this machine, Qwen2.5-1.5B, 48-token generation:
+
+| device / dtype | warm prefill | 3-agent vote round | tok/s | peak VRAM |
+|---|---|---|---|---|
+| **cuda / bf16** | **0.04 s** | **0.1 s** | **31.6** | 3.12 GB |
+| cuda / fp32 | 0.14 s | 0.4 s | 14.1 | 6.23 GB |
+| cpu / fp32 | 0.97 s | 2.9 s | 2.3 | — |
+| cpu / bf16 | 3.46 s | 10.4 s | 0.9 | — |
+
+- **§4's bf16 hypothesis is CONFIRMED on CPU**: fp32 is ~3.6× faster than bf16 there
+  (2.3 vs 0.9 tok/s). The old laptop's pathological 0.2 tok/s was indeed the bf16 fallback.
+- On the GPU, bf16 is 2.2× faster than fp32 and uses half the VRAM. Use bf16 on CUDA.
+- **31.6 tok/s means design A is affordable.** It is still not recommended: the prose the
+  1.5B produced was exactly the generic filler §7 predicted — *"The high error rate suggests
+  a potential critical issue that needs immediate attention"* — which it would say for any
+  alert. Speed was never the real objection to narration; quality was. Design C stands.
+- Cold first pass on GPU is only 0.26 s, so the 9 s stall is gone, but `debate.py` still does
+  a warm-up pass.
+
+### Steering WORKS, within a narrow window
+`sweep.py`, 30 scenarios per coefficient, steering layer 14 of 28, readout layer 20:
+
+| c | wait | page | restart | mass | proj |
+|---|---|---|---|---|---|
+| −3.0 | 67% | 33% | 0% | 0.999 | 8.44 |
+| −1.0 | 53% | 37% | 10% | 0.999 | 9.15 |
+| **0** | 40% | 27% | 33% | 0.999 | 9.37 |
+| +1.0 | 40% | 17% | 43% | 0.999 | 9.46 |
+| **+1.5** | 40% | 10% | **50%** | 0.999 | 9.44 |
+| +3.0 | 70% | 0% | 30% | 0.999 | 8.90 |
+
+Monotonic over **c ∈ [−3, +1.5]**: restart share goes 0% → 50%. Past +1.5 the effect
+**reverses**. `MAX_STRENGTH = 1.5`, and that is now the default in `debate.py`.
+
+Three things here were wrong and are fixed; do not reintroduce them:
+
+1. **`mass` is NOT a sufficient breakage detector.** It sat at 0.999 across the entire sweep,
+   including well past the reversal point. It catches gibberish, not semantic collapse —
+   the model keeps emitting a valid action word, just the wrong one. `sweep.py` now finds the
+   usable range from **monotonicity**, not from `mass`.
+2. **The difference-of-means vector pointed the WRONG WAY.** With `risk_vec = mean(reckless) −
+   mean(cautious)`, positive `c` made the model *more cautious*. A difference-of-means
+   direction has no guarantee of aligning with the behaviour its label claims.
+   `build_risk_vec.py` now **measures** the sign and negates the vector if needed, so "turn it
+   up, it gets braver" is true by construction rather than by hope. Rewording the contrast
+   prompts to be strictly parallel (and to avoid naming any action word) did not fix the sign
+   on its own — it is not only lexical leakage.
+3. **`read_vec` needs its own orientation, separate from `steer_vec`.** They are different
+   vectors at different layers; the flip that corrects the knob does not necessarily correct
+   the needle. Flipping both together left the servo running backwards. Now calibrated
+   separately, so the needle rises as the agent becomes more interventionist.
+
+### The agent is weak at the task, and this is the honest number
+`run_baseline.py`, 40 held-out scenarios, knobs at 0: **45% correct against a 40% floor** for
+always-picking-the-most-common action. That is barely above trivial.
+
+But `diagnose.py` shows the model is **not** blind to the scenario:
+**spearman(p, log p(restart) − log p(wait)) = +0.525.** It reads the numbers and leans the
+right way; its three-way decision threshold is simply badly placed. That is a much more
+honest and more interesting thing to say than claiming it reasons well.
+
+Also measured:
+- **Prompt wording swings accuracy from 20% to 50%** on identical information. An explicit
+  if/then rule placed *after* the alert details won; the same facts phrased as "doing nothing
+  is only worth it below X%" scored 30% in the same position. `describe()` now uses the
+  winner, with the A/B recorded in a comment so nobody "tidies" it back.
+- **Prior-matched calibration** (adding `log(prior)` so the average action distribution
+  matches how often each action is actually correct) reproduces the true marginals almost
+  exactly — 20/23/17 against a true 21/23/16 — but does *not* improve per-item accuracy
+  (42% vs 45%). `diagnose.py` scores all three calibration targets side by side.
+- The near-zero confidence at c=0 (~0.03) is the calibration artifact §4 already warned
+  about. It means the servos vibrate hard at all times with the knob centred. Worth knowing
+  before you are surprised by it on stage.
+
+### The vibration signal was broken, and the measurement that proved it
+
+Hardware testing showed the vibration was barely noticeable and carried no information. It
+was not a mechanical problem. `jitter` was `1 - confidence` with
+`confidence = 1 - H/ln3`, and calibrating on the neutral persona forces the average
+distribution toward uniform, so confidence sat at ~0.03. Measured over 125 decisions
+(5 coefficients x 25 scenarios):
+
+| signal | min | max | mean | span |
+|---|---|---|---|---|
+| `1 - confidence` (old) | 0.709 | 0.999 | 0.920 | 0.289 |
+| `1 - margin` | 0.432 | 0.996 | 0.836 | 0.564 |
+
+Deciles of the old signal: `[0,0,0,0,0,0,0,5,35,85]` — **96% of all decisions landed in the
+top two deciles.** The servos vibrated at ~92% amplitude permanently. It showed nothing, and
+it masked the needle movement the knob was producing, which is why steering "seemed to do
+nothing" on the bench.
+
+Three changes fixed it:
+1. **Use `margin` (gap between the best and second-best action), not entropy.** Entropy over
+   three actions is dragged around by the third, irrelevant option. Margin spans twice as
+   much.
+2. **Normalise against the range actually being observed, adaptively.** A first attempt
+   measured the range during `calibrate()` and that was *also* wrong: calibration runs on
+   solo decisions, but every decision in the debate loop carries peer context and is far more
+   decisive, so every live margin fell outside the calibrated range and attention clamped to
+   **0.00 for every agent on every scenario** — the servos went completely still.
+   `Brain.observe_margin` now tracks the live range, expanding instantly and contracting
+   slowly. Attention is therefore explicitly **relative**: how torn this agent is compared
+   with how torn agents have recently been. Say it that way; it is also the more useful
+   signal, because the operator needs to know which agent to turn the knob on *now*.
+   Subtle ordering bug worth not reintroducing: contract *then* expand. The other order pulls
+   the bound back inside the value just admitted (observing 0.9 left the max at 0.8995) so a
+   fresh extreme still clamps.
+3. **Make it physically visible.** Amplitude 6 degrees -> 45, with every servo sweeping about
+   one shared centre so the three are comparable, a peak-velocity cap so the gears and the
+   battery survive, and a phase stagger so the three current peaks do not coincide.
+
+After: attention spans **0.06-0.93** (sweeps of 3-42 degrees) and the three agents visibly
+differ on the same alert.
+
+Related, same root cause of "the knob seems to do nothing": the encoder moved the knob
+**3 degrees per click out of 180**, a coefficient step of 0.07 and 60 clicks to cross the
+range. Now 9 degrees per click.
+
+### Incidental but it will cost you an hour if you hit it
+- `pip install torch` on Windows gives the **CPU-only** wheel. Use the CUDA index.
+- `transformers` 5.x renamed `torch_dtype` to `dtype`.
+- Killing a backgrounded Python from a shell kills the wrapper, not the interpreter. Orphaned
+  `fake_pi.py` / `panel.py` processes stay bound to UDP 9001/9002 and silently steal the
+  packets, which looks exactly like a protocol bug. Check for strays before debugging the
+  bridge.
+
+---
+
 ## 1. Why this doc exists
 
 The original dev laptop is CPU-only and too slow to answer one architectural question:
@@ -20,13 +198,22 @@ design is settled. The target machine (32 GB RAM, faster CPU) needs to answer th
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt     # torch transformers accelerate treys
-.venv/bin/python bench.py                     # ~3 GB model download on first run
+# GPU machine: install torch from the CUDA index FIRST. On Windows, plain `pip install torch`
+# gives the CPU-only wheel and torch.cuda.is_available() will be False.
+.venv/Scripts/pip install torch --index-url https://download.pytorch.org/whl/cu130
+.venv/Scripts/pip install -r requirements.txt
+export HF_HUB_DISABLE_XET=1                   # see §0; without it the download may crawl
+.venv/Scripts/python bench.py                 # ~3 GB model download on first run
+.venv/Scripts/python tests.py                 # 32 tests, no model needed
 ```
 
+(On Linux/macOS the venv binaries are at `.venv/bin/` instead of `.venv/Scripts/`.)
+
 Env vars:
+- `WORLD` — `incident` (default) or `poker`
 - `MODEL` — default `Qwen/Qwen2.5-1.5B-Instruct`
-- `DTYPE` — **use fp32 on CPU.** See the bf16 warning in §4.
+- `DTYPE` — `bf16` on GPU, **fp32 on CPU.** See the bf16 warning in §4.
+- `MAX_STRENGTH` — knob range, default 3.0; set it from `sweep.py`
 
 ---
 
@@ -306,26 +493,29 @@ makes it special, and if it fails there is still a demo. The current state is ba
 hackathon: the ML half is half-built and the safe half is not built at all.
 
 **Must have**
-1. `bench.py` on the new machine — decides §7's text design
-2. `incident.py` — scenarios (`wait`/`page`/`restart`, ~100 lines, replaces `poker.py`);
-   repoint the import in `agent.py` and reword the three personas
-3. `debate.py` — 30-second round loop, weighted votes, alpha weighting, keyboard controls,
-   printing all metrics per round
-4. Pi bridge + `fake_pi.py` that just prints the JSON so it is testable with no hardware
+1. ~~`bench.py` on the new machine~~ — **DONE** (rewritten for GPU; see §0)
+2. ~~`incident.py`~~ — **DONE**, plus `world.py` so poker still works as `WORLD=poker`
+3. ~~`debate.py`~~ — **DONE**: round loop, alpha-weighted votes, conformity, influence,
+   keyboard control, templated readout (design C), bridge output
+4. ~~Pi bridge + `fake_pi.py`~~ — **DONE**: `bridge.py` (UDP JSON, frozen format, swallows all
+   errors) and `fake_pi.py` (`--sweep` fakes three pots so the inbound path is testable)
 
 **Should have**
-5. **Risk vector.** ~50 contrastive prompt pairs (reckless vs cautious persona, same scenario),
-   mean layer-L hidden state at the last token for each side,
-   `risk_vec = mean(risky) - mean(safe)`, save to `risk_vec.pt` (gitignored).
-6. **Coefficient sweep.** `c` in [-4,-2,-1,0,1,2,4] over ~20 scenarios. Expect restart-rate up
-   and wait-rate down monotonically in `c`. Find MAX_STRENGTH just below where `mass` collapses.
-   Also try layers L±4.
+5. ~~**Risk vector**~~ — **DONE**: `build_risk_vec.py`, 50 contrastive pairs, saves vectors at
+   *two* layers (steer and read — see §0 on why). Not yet run: needs the model download.
+6. ~~**Coefficient sweep**~~ — **DONE**: `sweep.py`, with monotonicity and `mass`-collapse
+   checks and a suggested MAX_STRENGTH. Not yet run.
+7. ~~Conformity + influence metrics~~ — **DONE** in `agent.py`, exercised by `debate.py`
+   round 0.
 
-**Nice to have**
-7. Conformity + influence metrics (one extra pass per agent at round 0)
-8. Urgency as a second steering vector — same recipe, contrast pair
-   "this is an emergency, every second counts" vs "there's no rush, be thorough".
-   Honest caveat: there is not yet **one** working vector; treat this as a stretch goal.
+**Still open**
+8. Run `build_risk_vec.py` then `sweep.py` and see whether the knob moves behaviour
+   monotonically. **This is the one remaining make-or-break unknown.** Everything else works
+   without it, and `logit` mode covers the failure case honestly.
+9. Urgency as a second steering vector — same recipe, contrast pair "this is an emergency,
+   every second counts" vs "there's no rush, be thorough". Stretch goal; there is not yet
+   **one** confirmed working vector.
+10. Zack: consume `bridge.py`'s JSON on the Pi. Testable today against `fake_pi.py`.
 
 **Cut:** deception as a measured quantity.
 

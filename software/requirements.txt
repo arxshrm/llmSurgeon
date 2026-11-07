@@ -1,4 +1,14 @@
+# CPU-only is fine, but if the machine has an NVIDIA GPU install torch from the CUDA index
+# FIRST, otherwise pip gives you the CPU-only wheel on Windows:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu130
+#   pip install -r requirements.txt
+#
+# If a model download crawls at tens of KB/s, the xet backend has throttled itself:
+#
+#   HF_HUB_DISABLE_XET=1
+#
 torch
 transformers
 accelerate
-treys
+treys          # poker world only (WORLD=poker); the incident world needs no extra deps
